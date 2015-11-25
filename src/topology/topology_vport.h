@@ -43,6 +43,10 @@ enum STUB_TYPE{
 
 void * alloc_stub_element(enum STUB_TYPE type);
 uint32_t calculate_hash_value(void * ele,enum STUB_TYPE type);
+void * index_hash_element(struct hash_table_stub*hts,void*ele_tmp,enum STUB_TYPE type);
+void * delete_hash_element(struct hash_table_stub*hts,void * ele,enum STUB_TYPE type);
+void * insert_hash_element(struct hash_table_stub *hts,void *ele_tmp,enum STUB_TYPE type);
+
 
 
 #endif

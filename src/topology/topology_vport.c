@@ -3,7 +3,7 @@
 #include"topology_vport.h"
 #include "flex_hash_array.h"
 
-#define VPORT_STUB_LENGTH 1024
+#define VPORT_STUB_LENGTH 2
 #define DOMAIN_STUB_LENGTH 1024
 #define DEVICE_STUB_LENGTH 1024
 
@@ -15,10 +15,57 @@ struct hash_table_stub * device_stub;
 
 int main()
 {
-	/*
+/*
+	struct topology_vport* vport;
+	vport_stub=alloc_flex_stub_array(VPORT_STUB_LENGTH);
+	vport=alloc_stub_element(STUB_TYPE_VPORT);
+	copy_mac_address(vport->vport_id,"\x01\x35\x00\x78\xcc\xcc");
+	struct topology_vport* vport_new=insert_hash_element(vport_stub,vport,STUB_TYPE_VPORT);
+	printf("indesrt1:%08x\n",vport_new);
+
+	copy_mac_address(vport->vport_id,"\x02\x33\x00\x78\xcc\xcc");
+	struct topology_vport* vport_new1=insert_hash_element(vport_stub,vport,STUB_TYPE_VPORT);
+	printf("indesrt2:%08x\n",vport_new1);
+	
+	copy_mac_address(vport->vport_id,"\x02\x53\x0f\x78\xcc\xcc");
+	struct topology_vport* vport_new2=insert_hash_element(vport_stub,vport,STUB_TYPE_VPORT);
+	printf("indesrt3:%08x\n",vport_new2);
+
+	copy_mac_address(vport->vport_id,"\x02\x53\x0f\x78\xcd\x2c");
+	struct topology_vport* vport_new3=insert_hash_element(vport_stub,vport,STUB_TYPE_VPORT);
+	printf("indesrt4:%08x\n",vport_new3);
+
+	copy_mac_address(vport->vport_id,"\xf2\x53\x0f\x78\x9d\x23");
+	struct topology_vport* vport_new4=insert_hash_element(vport_stub,vport,STUB_TYPE_VPORT);
+	printf("indesrt5:%08x\n",vport_new4);
+	
+	int idx;
+	for(idx=0;idx<VPORT_STUB_LENGTH;idx++){
+		printf("%d:",idx);
+		struct topology_vport * lp_tv=vport_stub[idx].header_ptr;
+		while(lp_tv){
+			printf("%08x,",lp_tv);
+			lp_tv=lp_tv->hash_tbl_next;
+		}
+		printf("\n");
+	}
+	struct topology_vport * dele=delete_hash_element(vport_stub,vport_new3,STUB_TYPE_VPORT);
+	dele=delete_hash_element(vport_stub,vport_new3,STUB_TYPE_VPORT);
+	printf("delete:%08x\n",dele);
+		for(idx=0;idx<VPORT_STUB_LENGTH;idx++){
+		printf("%d:",idx);
+		struct topology_vport * lp_tv=vport_stub[idx].header_ptr;
+		while(lp_tv){
+			printf("%08x,",lp_tv);
+			lp_tv=lp_tv->hash_tbl_next;
+		}
+		printf("\n");
+	}
+	
+	
 	vport_stub=alloc_flex_stub_array(VPORT_STUB_LENGTH);
 	domain_stub=alloc_flex_stub_array(DOMAIN_STUB_LENGTH);
-	device_stub=alloc_flex_stub_array(DEVICE_STUB_LENGTH);*/
+	device_stub=alloc_flex_stub_array(DEVICE_STUB_LENGTH);
 	
 	void * lp=alloc_stub_element(STUB_TYPE_VPORT);
 	((struct topology_vport*)lp)->vport_id[7]=0x10;
@@ -26,7 +73,7 @@ int main()
 	
 	lp=alloc_stub_element(STUB_TYPE_DOMAIN);
 	printf("%08x\n",calculate_hash_value(lp,STUB_TYPE_DOMAIN));
-	
+	*/
 	return 0;
 }
 
@@ -96,7 +143,9 @@ void * insert_hash_element(struct hash_table_stub *hts,void *ele_tmp,enum STUB_T
 		case STUB_TYPE_VPORT:
 			lp_tv=(struct topology_vport *)ele_tmp;
 			lp_tv_tmp=(struct topology_vport *)alloc_stub_element(STUB_TYPE_VPORT);
-			index%=VPORT_STUB_LENGTH;
+			/*copy primary key*/
+			copy_mac_address(lp_tv_tmp->vport_id,lp_tv->vport_id);
+			index&=(VPORT_STUB_LENGTH-1);
 			lp_tv_tmp->hash_tbl_next=(struct topology_vport *)hts[index].header_ptr;
 			hts[index].header_ptr=lp_tv_tmp;
 			ret=lp_tv_tmp;
@@ -104,7 +153,8 @@ void * insert_hash_element(struct hash_table_stub *hts,void *ele_tmp,enum STUB_T
 		case STUB_TYPE_DOMAIN:
 			lp_tid=(struct topology_lan_domain *)ele_tmp;
 			lp_tid_tmp=(struct topology_lan_domain *)alloc_stub_element(STUB_TYPE_DOMAIN);
-			index%=DOMAIN_STUB_LENGTH;
+			lp_tid_tmp->domain_id=lp_tid->domain_id;
+			index&=(DOMAIN_STUB_LENGTH-1);
 			lp_tid_tmp->hash_tbl_next=(struct topology_lan_domain *)hts[index].header_ptr;
 			hts[index].header_ptr=lp_tid_tmp;
 			ret=lp_tid_tmp;
@@ -112,13 +162,80 @@ void * insert_hash_element(struct hash_table_stub *hts,void *ele_tmp,enum STUB_T
 		case STUB_TYPE_DEVICE:
 			lp_td=(struct topology_device *)ele_tmp;
 			lp_td_tmp=(struct topology_device *)alloc_stub_element(STUB_TYPE_DEVICE);
-			index%=DEVICE_STUB_LENGTH;
+			lp_td_tmp->chassis_id=lp_td->chassis_id;
+			index&=(DEVICE_STUB_LENGTH-1);
 			lp_td_tmp->hash_tbl_next=(struct topology_device *)hts[index].header_ptr;
 			hts[index].header_ptr=lp_td_tmp;
 			ret=lp_td_tmp;
 			break;
 	}
 
+	return ret;
+}
+//remove from hash list ,but we do not dealloc it,and return it to caller
+void * delete_hash_element(struct hash_table_stub*hts,void * ele,enum STUB_TYPE type)
+{
+	void *ret=NULL;
+	struct topology_vport *lp_tv,*lp_tv_tmp;
+	struct topology_lan_domain * lp_tid,*lp_tid_tmp;
+	struct topology_device *lp_td,*lp_td_tmp;
+	int index=calculate_hash_value(ele,type);
+	switch(type)
+	{
+		case STUB_TYPE_VPORT:
+			index&=(VPORT_STUB_LENGTH-1);
+			lp_tv=(struct topology_vport*)hts[index].header_ptr;
+			
+			if(lp_tv==ele){/*in case that it's the first nodes in the hash list*/
+				hts[index].header_ptr=lp_tv?lp_tv->hash_tbl_next:NULL;
+				ret=lp_tv;
+			}else if(lp_tv){
+				while(lp_tv->hash_tbl_next){
+					
+					if(lp_tv->hash_tbl_next==ele){//in case this is lp_tv is last node and ele is NULL
+						ret=lp_tv->hash_tbl_next;
+						lp_tv->hash_tbl_next=ret?lp_tv->hash_tbl_next->hash_tbl_next:NULL;
+						break;
+					}
+					lp_tv=lp_tv->hash_tbl_next;
+				}
+			}
+			break;
+		case STUB_TYPE_DOMAIN:
+			index&=(DOMAIN_STUB_LENGTH-1);
+			lp_tid=(struct topology_lan_domain*) hts[index].header_ptr;
+			if(lp_tid==ele){
+				hts[index].header_ptr=lp_tid?lp_tid->hash_tbl_next:NULL;
+				ret=lp_tid;
+			}else if(lp_tid){
+				while(lp_tid->hash_tbl_next){
+					if(lp_tid->hash_tbl_next==ele){
+						ret=lp_tid->hash_tbl_next;
+						lp_tid->hash_tbl_next=ret?lp_tid->hash_tbl_next->hash_tbl_next:NULL;
+						break;
+					}
+					lp_tid=lp_tid->hash_tbl_next;
+				}
+			}
+			break;
+		case STUB_TYPE_DEVICE:
+			index&=(DEVICE_STUB_LENGTH-1);
+			lp_td=(struct topology_device*)hts[index].header_ptr;
+			if(lp_td==ele){
+				hts[index].header_ptr=lp_td?lp_td->hash_tbl_next:NULL;
+				ret=lp_td;
+			}else if(lp_td){
+				while(lp_td->hash_tbl_next){
+					if(lp_td->hash_tbl_next==ele){
+						ret=lp_td->hash_tbl_next;
+						lp_td->hash_tbl_next=ret?lp_td->hash_tbl_next->hash_tbl_next:NULL;
+						break;
+					}
+					lp_td=lp_td->hash_tbl_next;
+				}
+			}
+			break;
+	}
 	return ret;
 }
 void * index_hash_element(struct hash_table_stub*hts,void*ele_tmp,enum STUB_TYPE type)
