@@ -11,5 +11,5 @@
 	dst[5]=src[5]; \
 }while(0)
 	
-
+void uuid_init(int seed);
 #endif

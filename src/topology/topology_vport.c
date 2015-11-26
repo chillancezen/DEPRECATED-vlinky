@@ -12,9 +12,38 @@ struct hash_table_stub * vport_stub;
 struct hash_table_stub * domain_stub;
 struct hash_table_stub * device_stub;
 
+void topology_init()
+{
+	vport_stub=alloc_flex_stub_array(VPORT_STUB_LENGTH);
+	domain_stub=alloc_flex_stub_array(DOMAIN_STUB_LENGTH);
+	device_stub=alloc_flex_stub_array(DEVICE_STUB_LENGTH);
+}
+int add_vport_nodes(struct hash_table_stub*hts_vport,
+	struct hash_table_stub*hts_domain,
+	struct hash_table_stub*hts_device,
+	struct topology_vport*ele_tmp1,
+	struct topology_vport*ele_tmp2){
+	struct topology_vport * ele1;
+	struct topology_vport * ele2;
+	ele1=index_hash_element(hts_vport,ele_tmp1,STUB_TYPE_VPORT);
+	ele2=index_hash_element(hts_vport,ele_tmp2,STUB_TYPE_VPORT);
+
+	if(!ele1)
+		ele1=insert_hash_element(hts_vport,ele_tmp1,STUB_TYPE_VPORT);
+	if(!ele2)
+		ele2=insert_hash_element(hts_vport,ele_tmp1,STUB_TYPE_VPORT);
+	if(!ele1||!ele2){/*here we let it be there and we don't reclaim them if not successfull*/
+		return -1;
+	}
+	/*here we must emerge them into potential domain and device list*/
+	
+	
+	return 0;
+}
 
 int main()
 {
+	topology_init();
 /*
 	struct topology_vport* vport;
 	vport_stub=alloc_flex_stub_array(VPORT_STUB_LENGTH);
@@ -130,6 +159,11 @@ void * alloc_stub_element(enum STUB_TYPE type)
 	
 	return ret;
 }
+void dealloc_stub_element(void* ele)
+{
+	if(ele)
+		free(ele);
+}
 void * insert_hash_element(struct hash_table_stub *hts,void *ele_tmp,enum STUB_TYPE type)
 {
 //allocate a node and insert it into the hash head
@@ -143,6 +177,8 @@ void * insert_hash_element(struct hash_table_stub *hts,void *ele_tmp,enum STUB_T
 		case STUB_TYPE_VPORT:
 			lp_tv=(struct topology_vport *)ele_tmp;
 			lp_tv_tmp=(struct topology_vport *)alloc_stub_element(STUB_TYPE_VPORT);
+			if(lp_tv_tmp)
+				break;
 			/*copy primary key*/
 			copy_mac_address(lp_tv_tmp->vport_id,lp_tv->vport_id);
 			index&=(VPORT_STUB_LENGTH-1);
@@ -154,6 +190,8 @@ void * insert_hash_element(struct hash_table_stub *hts,void *ele_tmp,enum STUB_T
 			lp_tid=(struct topology_lan_domain *)ele_tmp;
 			lp_tid_tmp=(struct topology_lan_domain *)alloc_stub_element(STUB_TYPE_DOMAIN);
 			lp_tid_tmp->domain_id=lp_tid->domain_id;
+			if(lp_tid_tmp)
+				break;
 			index&=(DOMAIN_STUB_LENGTH-1);
 			lp_tid_tmp->hash_tbl_next=(struct topology_lan_domain *)hts[index].header_ptr;
 			hts[index].header_ptr=lp_tid_tmp;
@@ -163,6 +201,8 @@ void * insert_hash_element(struct hash_table_stub *hts,void *ele_tmp,enum STUB_T
 			lp_td=(struct topology_device *)ele_tmp;
 			lp_td_tmp=(struct topology_device *)alloc_stub_element(STUB_TYPE_DEVICE);
 			lp_td_tmp->chassis_id=lp_td->chassis_id;
+			if(lp_td_tmp)
+				break;
 			index&=(DEVICE_STUB_LENGTH-1);
 			lp_td_tmp->hash_tbl_next=(struct topology_device *)hts[index].header_ptr;
 			hts[index].header_ptr=lp_td_tmp;
