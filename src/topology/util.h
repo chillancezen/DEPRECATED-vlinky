@@ -12,4 +12,5 @@
 }while(0)
 	
 void uuid_init(int seed);
+unsigned int uuid_alloc();
 #endif

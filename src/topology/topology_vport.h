@@ -54,7 +54,12 @@ uint32_t calculate_hash_value(void * ele,enum STUB_TYPE type);
 void * index_hash_element(struct hash_table_stub*hts,void*ele_tmp,enum STUB_TYPE type);
 void * delete_hash_element(struct hash_table_stub*hts,void * ele,enum STUB_TYPE type);
 void * insert_hash_element(struct hash_table_stub *hts,void *ele_tmp,enum STUB_TYPE type);
-
+#define FOREACH_VPORT_IN_DOMAIN(dom,lptr) for((lptr)=((struct topology_lan_domain*)(dom))->first_vport_ptr;\
+											(lptr);\
+											(lptr)=(lptr)->domain_next_vport_ptr)
+#define FOREACH_VPORT_IN_DEVICE(dev,lptr) for((lptr)=((struct topology_device*)(dev))->first_vport_ptr;\
+											(lptr);\
+											(lptr)=(lptr)->first_vport_ptr);
 
 
 #endif

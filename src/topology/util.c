@@ -6,3 +6,7 @@ void uuid_init(int seed)
 {
 	int_seed=seed;
 }
+unsigned int uuid_alloc()
+{
+	return int_seed++;
+}
