@@ -103,6 +103,27 @@ void remove_domain_from_global_list(struct topology_lan_domain*head,struct topol
 		lptr=lptr->global_list_next;
 	}
 }
+void add_device_into_global_list(struct topology_device* head,struct topology_device*device)
+{
+	struct topology_device *lptr=head;
+	while(lptr->global_list_next){
+		if(lptr->global_list_next==device)
+			return ;
+		lptr=lptr->global_list_next;
+	}
+	lptr->global_list_next=device;
+}
+void remove_device_from_global_list(struct topology_device*head,struct topology_device*device)
+{
+	struct topology_device*lptr=head;
+	while(lptr->global_list_next){
+		if(lptr->global_list_next==device){
+			lptr->global_list_next=device->global_list_next;
+			break;
+		}
+		lptr=lptr->global_list_next;
+	}
+}
 int main()
 {
 	topology_init();
@@ -128,6 +149,14 @@ int main()
 	tld_index=index_hash_element(domain_stub,tld_base,STUB_TYPE_DOMAIN);
 	if(tld_index)
 	add_domain_into_global_list(&domain_head,tld_index);
+
+
+	tld_base->domain_id=0x12345671;
+	tld_index=index_hash_element(domain_stub,tld_base,STUB_TYPE_DOMAIN);
+	if(tld_index){
+		remove_domain_from_global_list(&domain_head,tld_index);
+		delete_hash_element(domain_stub,tld_index,STUB_TYPE_DOMAIN);
+	}
 	
 	for(idx=0;idx<DOMAIN_STUB_LENGTH;idx++){
 		printf("%d:",idx);
