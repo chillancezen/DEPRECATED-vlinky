@@ -43,7 +43,41 @@ int add_vport_nodes(struct hash_table_stub*hts_vport,
 	
 	return 0;
 }
-
+void add_vport_to_device(struct topology_device *device,struct topology_vport*vport)
+{
+	struct topology_vport *lptr;
+	FOREACH_VPORT_IN_DEVICE(device,lptr){
+		if(lptr==vport)
+			return ;
+	}
+	vport->device_next_vport_ptr=NULL;
+	if(!device->first_vport_ptr)
+		device->first_vport_ptr=vport;
+	else{
+		lptr=device->first_vport_ptr;
+		while(lptr->device_next_vport_ptr)
+			lptr=lptr->device_next_vport_ptr;
+		lptr->device_next_vport_ptr=vport;
+	}
+	device->vport_count++;
+	vport->td=device;
+}
+void remove_vport_from_device(struct topology_device* device,struct topology_vport*vport)
+{
+	struct topology_vport*lptr,*last=NULL;
+	FOREACH_VPORT_IN_DEVICE(device,lptr){
+		if(lptr==vport){
+			if(!last)
+				device->first_vport_ptr=vport->device_next_vport_ptr;
+			else
+				last->device_next_vport_ptr=vport->device_next_vport_ptr;
+			device->vport_count--;
+			vport->td=NULL;
+			vport->device_next_vport_ptr=NULL;
+		}
+		last=lptr;
+	}
+}
 void add_vport_to_domain(struct topology_lan_domain *domain,struct topology_vport*vport)
 {
 	/*sanity-check whether the vport already in the domain list*/
