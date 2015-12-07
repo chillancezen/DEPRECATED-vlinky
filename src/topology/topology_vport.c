@@ -1,5 +1,5 @@
 
-
+#include <assert.h>
 #include"topology_vport.h"
 #include "flex_hash_array.h"
 
@@ -22,25 +22,101 @@ void topology_init()
 	memset(&domain_head,0x0,sizeof(struct topology_lan_domain));
 	memset(&device_head,0x0,sizeof(struct topology_device));
 }
-int add_vport_nodes(struct hash_table_stub*hts_vport,
+int remove_vport_node_from_topology(struct hash_table_stub*hts_vport,
 	struct hash_table_stub*hts_domain,
 	struct hash_table_stub*hts_device,
+	struct topology_device *device_hdr,
+	struct topology_lan_domain *domain_hdr)
+{
+
+}
+int add_vport_node_pairs_into_topology (struct hash_table_stub*hts_vport,
+	struct hash_table_stub*hts_domain,
+	struct hash_table_stub*hts_device,
+	struct topology_device *device_hdr,
+	struct topology_lan_domain *domain_hdr,
 	struct topology_vport*ele_tmp1,
-	struct topology_vport*ele_tmp2){
+	unsigned int device_id1,
+	struct topology_vport*ele_tmp2,
+	unsigned int device_id2,
+	unsigned int domain_id){
 	struct topology_vport * ele1;
 	struct topology_vport * ele2;
+	struct topology_device td_tmp;
+	struct topology_device *td_tmp_ptr;
+	struct topology_lan_domain ld_tmp;
+	struct topology_lan_domain *ld_tmp_ptr;
 	ele1=index_hash_element(hts_vport,ele_tmp1,STUB_TYPE_VPORT);
 	ele2=index_hash_element(hts_vport,ele_tmp2,STUB_TYPE_VPORT);
 
 	if(!ele1)
 		ele1=insert_hash_element(hts_vport,ele_tmp1,STUB_TYPE_VPORT);
 	if(!ele2)
-		ele2=insert_hash_element(hts_vport,ele_tmp1,STUB_TYPE_VPORT);
+		ele2=insert_hash_element(hts_vport,ele_tmp2,STUB_TYPE_VPORT);
 	if(!ele1||!ele2){/*here we let it be there and we don't reclaim them if not successfull*/
 		return -1;
 	}
 	/*here we must emerge them into potential domain and device list*/
-	
+	/*1.device issues*/
+	if(!ele1->td){
+		
+		memset(&td_tmp,0x0,sizeof(struct topology_device));
+		td_tmp.chassis_id=device_id1;
+		td_tmp_ptr=index_hash_element(hts_device,&td_tmp,STUB_TYPE_DEVICE);
+		if(!td_tmp_ptr){
+			td_tmp_ptr=insert_hash_element(hts_device,&td_tmp,STUB_TYPE_DEVICE);
+			if(td_tmp_ptr)
+				add_device_into_global_list(device_hdr,td_tmp_ptr);
+		}
+		if(td_tmp_ptr){
+			add_vport_to_device(td_tmp_ptr,ele1);
+		}else
+			return -1;
+	}
+	if(!ele2->td){
+		
+		memset(&td_tmp,0x0,sizeof(struct topology_device));
+		td_tmp.chassis_id=device_id2;
+		td_tmp_ptr=index_hash_element(hts_device,&td_tmp,STUB_TYPE_DEVICE);
+		if(!td_tmp_ptr){
+			td_tmp_ptr=insert_hash_element(hts_device,&td_tmp,STUB_TYPE_DEVICE);
+			if(td_tmp_ptr)
+				add_device_into_global_list(device_hdr,td_tmp_ptr);
+		}
+		if(td_tmp_ptr){
+			add_vport_to_device(td_tmp_ptr,ele2);
+		}else
+			return -1;
+	}
+	/*2. domain issues*/
+	if(!ele1->ld){
+		memset(&ld_tmp,0x0,sizeof(struct topology_lan_domain));
+		ld_tmp.domain_id=domain_id;
+		ld_tmp_ptr=index_hash_element(hts_domain,&ld_tmp,STUB_TYPE_DOMAIN);
+		if(!ld_tmp_ptr){
+			ld_tmp_ptr=insert_hash_element(hts_domain,&ld_tmp,STUB_TYPE_DOMAIN);
+			if(ld_tmp_ptr)
+				add_domain_into_global_list(domain_hdr,ld_tmp_ptr);
+		}
+		if(ld_tmp_ptr)
+			add_vport_to_domain(ld_tmp_ptr,ele1);
+		else 
+			return -1;
+	}
+	if(!ele2->ld){
+		memset(&ld_tmp,0x0,sizeof(struct topology_lan_domain));
+		ld_tmp.domain_id=domain_id;
+		ld_tmp_ptr=index_hash_element(hts_domain,&ld_tmp,STUB_TYPE_DOMAIN);
+		if(!ld_tmp_ptr){
+			ld_tmp_ptr=insert_hash_element(hts_domain,&ld_tmp,STUB_TYPE_DOMAIN);
+			if(ld_tmp_ptr)
+				add_domain_into_global_list(domain_hdr,ld_tmp_ptr);
+		}
+		if(ld_tmp_ptr)
+			add_vport_to_domain(ld_tmp_ptr,ele2);
+		else 
+			return -1;
+	}
 	return 0;
 }
 void add_vport_to_device(struct topology_device *device,struct topology_vport*vport)
@@ -158,10 +234,73 @@ void remove_device_from_global_list(struct topology_device*head,struct topology_
 		lptr=lptr->global_list_next;
 	}
 }
+void dump_device(struct topology_device *dev)
+{
+	printf("device id:0x%08x %d:\n",dev->chassis_id,dev->vport_count);
+	struct topology_vport *vport=dev->first_vport_ptr;
+	while(vport){
+		printf("\t%02x:%02x:%02x:%02x:%02x:%02x\n",vport->vport_id[0]
+			,vport->vport_id[1]
+			,vport->vport_id[2]
+			,vport->vport_id[3]
+			,vport->vport_id[4]
+			,vport->vport_id[5]);
+		vport=vport->device_next_vport_ptr;
+	}
+}
+void dump_domain(struct topology_lan_domain *dom)
+{
+	printf("domain id:0x%08x %d:\n",dom->domain_id,dom->vport_count);
+	struct topology_vport *vport=dom->first_vport_ptr;
+	while(vport){
+		printf("\t%02x:%02x:%02x:%02x:%02x:%02x\n",vport->vport_id[0]
+			,vport->vport_id[1]
+			,vport->vport_id[2]
+			,vport->vport_id[3]
+			,vport->vport_id[4]
+			,vport->vport_id[5]);
+		vport=vport->domain_next_vport_ptr;
+	}
+}
 int main()
 {
 	topology_init();
+
+#if 1
+int rc;
+	struct topology_vport vport1;
+	struct topology_vport vport2;
+
+	copy_mac_address(vport1.vport_id,"\x12\x12\x12\x12\x12\x12");
+	copy_mac_address(vport2.vport_id,"\x12\x12\x12\x12\x12\x13");
+
+
+	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x12345,&vport2,0x1234,0x5555);
+	assert(rc==0);
+	copy_mac_address(vport1.vport_id,"\x12\x12\x12\x12\x12\x11");
+	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x12345,&vport2,0x1234,0x5555);
+	assert(rc==0);
+	copy_mac_address(vport2.vport_id,"\x12\x12\x12\x12\x12\x14");
+	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x12346,&vport2,0x1234,0x5556);
+	assert(rc==0);
+	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x12346,&vport2,0x1234,0x5556);
+	assert(rc==0);
+	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x12346,&vport2,0x1234,0x5556);
+	assert(rc==0);
 	
+	/*dump device*/
+	struct topology_device * dev_ptr=device_head.global_list_next;
+	while(dev_ptr){
+		dump_device(dev_ptr);
+		dev_ptr=dev_ptr->global_list_next;
+	}
+	struct topology_lan_domain*dom_ptr=domain_head.global_list_next;
+	while(dom_ptr){
+		dump_domain(dom_ptr);
+		dom_ptr=dom_ptr->global_list_next;
+	}
+	#endif
+	/*
 	int idx;
 
 	struct topology_lan_domain*tld_base=alloc_stub_element(STUB_TYPE_DOMAIN);
@@ -208,7 +347,7 @@ int main()
 		tld=tld->global_list_next;
 	}
 	
-/*
+
 	struct topology_vport* vport;
 	vport_stub=alloc_flex_stub_array(VPORT_STUB_LENGTH);
 	vport=alloc_stub_element(STUB_TYPE_VPORT);
