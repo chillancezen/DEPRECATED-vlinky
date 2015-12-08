@@ -3,8 +3,8 @@
 #include"topology_vport.h"
 #include "flex_hash_array.h"
 
-#define VPORT_STUB_LENGTH 2
-#define DOMAIN_STUB_LENGTH 16
+#define VPORT_STUB_LENGTH 4096
+#define DOMAIN_STUB_LENGTH 1024
 #define DEVICE_STUB_LENGTH 1024
 
 
@@ -26,9 +26,42 @@ int remove_vport_node_from_topology(struct hash_table_stub*hts_vport,
 	struct hash_table_stub*hts_domain,
 	struct hash_table_stub*hts_device,
 	struct topology_device *device_hdr,
-	struct topology_lan_domain *domain_hdr)
+	struct topology_lan_domain *domain_hdr,
+	struct topology_vport * ele_tmp)
 {
-
+	struct topology_vport *vport_ptr;
+	struct topology_device *device_ptr;
+	struct topology_lan_domain *domain_ptr;
+	
+	vport_ptr=index_hash_element(hts_vport,ele_tmp,STUB_TYPE_VPORT);
+	if(!vport_ptr)
+		return -1;
+	device_ptr=vport_ptr->td;
+	domain_ptr=vport_ptr->ld;
+	if(device_ptr){
+		remove_vport_from_device(device_ptr,vport_ptr);
+		if(!device_ptr->vport_count){
+			remove_device_from_global_list(device_hdr,device_ptr);
+			struct topology_device *device_tmp=delete_hash_element(hts_device,device_ptr,STUB_TYPE_DEVICE);
+			if(device_tmp)
+				dealloc_stub_element(device_tmp);
+		}
+		
+	}
+	if(domain_ptr){
+		remove_vport_from_domain(domain_ptr,vport_ptr);
+		if(!domain_ptr->vport_count){
+			remove_domain_from_global_list(domain_hdr,domain_ptr);
+			struct topology_lan_domain*domain_tmp=delete_hash_element(hts_domain,domain_ptr,STUB_TYPE_DOMAIN);
+			if(domain_tmp)
+				dealloc_stub_element(domain_tmp);
+		}
+		
+	}
+	struct topology_vport *vport_tmp=delete_hash_element(hts_vport,vport_ptr,STUB_TYPE_VPORT);
+	if(vport_tmp)
+		dealloc_stub_element(vport_tmp);
+	return 0;
 }
 int add_vport_node_pairs_into_topology (struct hash_table_stub*hts_vport,
 	struct hash_table_stub*hts_domain,
@@ -266,8 +299,8 @@ int main()
 {
 	topology_init();
 
-#if 1
-int rc;
+#if 0
+	int rc;
 	struct topology_vport vport1;
 	struct topology_vport vport2;
 
@@ -281,13 +314,16 @@ int rc;
 	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x12345,&vport2,0x1234,0x5555);
 	assert(rc==0);
 	copy_mac_address(vport2.vport_id,"\x12\x12\x12\x12\x12\x14");
-	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x12346,&vport2,0x1234,0x5556);
+	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x12346,&vport2,0x1237,0x5556);
 	assert(rc==0);
 	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x12346,&vport2,0x1234,0x5556);
 	assert(rc==0);
 	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x12346,&vport2,0x1234,0x5556);
 	assert(rc==0);
-	
+
+
+		
+	printf("remove rc:%d\n",rc);
 	/*dump device*/
 	struct topology_device * dev_ptr=device_head.global_list_next;
 	while(dev_ptr){
@@ -298,6 +334,44 @@ int rc;
 	while(dom_ptr){
 		dump_domain(dom_ptr);
 		dom_ptr=dom_ptr->global_list_next;
+	}
+	int idx;
+	for(idx=0;idx<VPORT_STUB_LENGTH;idx++){
+		if(!vport_stub[idx].header_ptr)
+			continue;
+		printf("%d:",idx);
+		struct topology_vport * lp_tv=vport_stub[idx].header_ptr;
+		while(lp_tv){
+			printf("%08x,",lp_tv);
+			lp_tv=lp_tv->hash_tbl_next;
+		}
+		printf("\n");
+	}
+	puts("");
+
+	for(idx=0;idx<DEVICE_STUB_LENGTH;idx++){
+		if(!device_stub[idx].header_ptr)
+			continue;
+		printf("%d:",idx);
+		struct topology_device * lp_tv=device_stub[idx].header_ptr;
+		while(lp_tv){
+			printf("%08x,",lp_tv);
+			lp_tv=lp_tv->hash_tbl_next;
+		}
+		printf("\n");
+	}
+	
+	puts("");
+	for(idx=0;idx<DOMAIN_STUB_LENGTH;idx++){
+		if(!domain_stub[idx].header_ptr)
+			continue;
+		printf("%d:",idx);
+		struct topology_lan_domain* lp_tv=domain_stub[idx].header_ptr;
+		while(lp_tv){
+			printf("%08x,",lp_tv);
+			lp_tv=lp_tv->hash_tbl_next;
+		}
+		printf("\n");
 	}
 	#endif
 	/*
@@ -464,6 +538,7 @@ void * alloc_stub_element(enum STUB_TYPE type)
 }
 void dealloc_stub_element(void* ele)
 {
+	puts("cute");
 	if(ele)
 		free(ele);
 }
