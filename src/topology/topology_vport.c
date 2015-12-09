@@ -295,11 +295,13 @@ void dump_domain(struct topology_lan_domain *dom)
 		vport=vport->domain_next_vport_ptr;
 	}
 }
+#if 0
+
 int main()
 {
 	topology_init();
 
-#if 0
+
 	int rc;
 	struct topology_vport vport1;
 	struct topology_vport vport2;
@@ -373,7 +375,7 @@ int main()
 		}
 		printf("\n");
 	}
-	#endif
+	
 	/*
 	int idx;
 
@@ -482,6 +484,7 @@ int main()
 	*/
 	return 0;
 }
+#endif
 
 
 uint32_t calculate_hash_value(void * ele,enum STUB_TYPE type)

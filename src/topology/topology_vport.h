@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include "util.h"
-
 #ifndef _TOPOLOGY_VPORT
 #define _TOPOLOGY_VPORT
 struct topology_lan_domain;
@@ -24,6 +23,7 @@ struct topology_vport{
 	struct topology_vport *hash_tbl_next;
 	struct topology_vport *domain_next_vport_ptr;
 	struct topology_vport *device_next_vport_ptr;
+	struct topology_vport *neighbour_ship_next_vport_ptr;
 };
 
 struct topology_lan_domain{
@@ -52,9 +52,13 @@ enum STUB_TYPE{
 	STUB_TYPE_DOMAIN=2,
 	STUB_TYPE_DEVICE=3
 };
+void topology_init();
+
+#if 1 /* not export these functions*/
 
 void * alloc_stub_element(enum STUB_TYPE type);
 void dealloc_stub_element(void* ele);
+
 
 uint32_t calculate_hash_value(void * ele,enum STUB_TYPE type);
 void * index_hash_element(struct hash_table_stub*hts,void*ele_tmp,enum STUB_TYPE type);
@@ -68,6 +72,7 @@ void add_domain_into_global_list(struct topology_lan_domain *head,struct topolog
 void remove_domain_from_global_list(struct topology_lan_domain*head,struct topology_lan_domain* domain);
 void add_device_into_global_list(struct topology_device* head,struct topology_device*device);
 void remove_device_from_global_list(struct topology_device*head,struct topology_device*device);
+#endif
 
 #define FOREACH_VPORT_IN_DOMAIN(dom,lptr) for((lptr)=((struct topology_lan_domain*)(dom))->first_vport_ptr;\
 											(lptr);\
@@ -87,6 +92,12 @@ int add_vport_node_pairs_into_topology (struct hash_table_stub*hts_vport,
 	unsigned int device_id2,
 	unsigned int domain_id);
 
+int remove_vport_node_from_topology(struct hash_table_stub*hts_vport,
+	struct hash_table_stub*hts_domain,
+	struct hash_table_stub*hts_device,
+	struct topology_device *device_hdr,
+	struct topology_lan_domain *domain_hdr,
+	struct topology_vport * ele_tmp);
 
 
 

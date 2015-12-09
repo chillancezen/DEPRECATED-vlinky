@@ -10,7 +10,9 @@
 	dst[4]=src[4]; \
 	dst[5]=src[5]; \
 }while(0)
-	
+
+#define FALSE 0
+#define TRUE (!(FALSE))
 void uuid_init(int seed);
 unsigned int uuid_alloc();
 #endif
