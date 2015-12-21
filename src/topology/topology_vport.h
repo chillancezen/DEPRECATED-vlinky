@@ -9,12 +9,15 @@
 #define _TOPOLOGY_VPORT
 struct topology_lan_domain;
 struct topology_device;
+#define INFINITE_COST 0x00ffffff
 
 
 enum vport_type{
 	vport_type_L2=1,
 	vport_type_L3=2
 };
+//struct edge_str;
+
 struct topology_vport{
 	uint8_t vport_id[6];
 	enum vport_type vport_type;
@@ -24,6 +27,15 @@ struct topology_vport{
 	struct topology_vport *domain_next_vport_ptr;
 	struct topology_vport *device_next_vport_ptr;
 	struct topology_vport *neighbour_ship_next_vport_ptr;
+
+	struct topology_vport *dijstra_backward_ptr;
+	//struct topology_vport *dijstra_first_backward_ptr;
+	struct topology_vport *dijstra_next_ecmp_ptr;
+	struct topology_vport *dijstra_permanent_ptr;
+	struct edge_str       *dijstra_backward_edge_ptr;
+	unsigned int cost_to_src;
+	unsigned int is_permanent:1;
+	
 };
 
 struct topology_lan_domain{
@@ -45,6 +57,11 @@ struct topology_device{
 
 struct hash_table_stub{
 	void* header_ptr;
+};
+struct edge_str{
+
+	struct topology_vport * directed_vport;
+	struct edge_str * next;
 };
 
 enum STUB_TYPE{
