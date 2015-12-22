@@ -9,7 +9,7 @@
 #define _TOPOLOGY_VPORT
 struct topology_lan_domain;
 struct topology_device;
-#define INFINITE_COST 0x00ffffff
+#define INFINITE_COST 0x0fffffff
 
 
 enum vport_type{
@@ -34,6 +34,7 @@ struct topology_vport{
 	struct topology_vport *dijstra_permanent_ptr;
 	struct edge_str       *dijstra_backward_edge_ptr;
 	unsigned int cost_to_src;
+	int upward_vport_count;
 	unsigned int is_permanent:1;
 	
 };

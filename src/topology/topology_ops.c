@@ -7,7 +7,7 @@ extern struct topology_lan_domain domain_head;
 extern struct topology_device     device_head;
 
 
-#define EDGE_STR_NUM (1*4)
+#define EDGE_STR_NUM (1024*4)
 struct edge_str edge_array[EDGE_STR_NUM+1];/*the 1st node would be the first*/
 
 
@@ -20,7 +20,7 @@ static void init_edge_array()
 		edge_array[idx-1].next=&edge_array[idx];
 	}
 }
-
+int debug_cnt=EDGE_STR_NUM;
 static struct edge_str* alloc_edge_element()
 {	
 	struct edge_str * ret=NULL;
@@ -32,10 +32,12 @@ static struct edge_str* alloc_edge_element()
 	}
 	if(ret)
 		memset(ret,0x0,sizeof(struct edge_str));
+	debug_cnt--;
 	return ret;
 }
 static void dealloc_edge_element(struct edge_str *ele)
 {
+	debug_cnt++;
 	ele->next=edge_array[0].next;
 	edge_array[0].next=ele;
 }
@@ -173,8 +175,10 @@ void dijstra_reset_vports(struct topology_vport * vport_src)
 		vport->dijstra_next_ecmp_ptr=NULL;
 		vport->dijstra_permanent_ptr=NULL;
 		vport->dijstra_backward_edge_ptr=NULL;
+		vport->upward_vport_count=0;
 		vport->cost_to_src=cost_between_vports(vport_src,vport);
 		vport=vport->neighbour_ship_next_vport_ptr;
+		
 	}
 }
 
@@ -192,7 +196,13 @@ int dijstra_find_short_ecmp_path(struct topology_vport*_vport_src,struct topolog
 	struct topology_vport * vport_adjacent_ptr;
 	struct topology_vport *vport_tmp1;
 	struct topology_vport *vport_tmp2;
+	struct topology_vport *ecmp_vport_ptr;
 	int current_least_cost;
+	struct edge_str*edge_tmp2;
+	struct topology_vport *vport_backward_ptr;
+	struct topology_vport *vport_tmp3;
+	int update_cost;
+	/*int least_upward_count;*/
 	
 	if(!vport_src ||!vport_dst)
 			return -1;/*node not found*/
@@ -200,21 +210,25 @@ int dijstra_find_short_ecmp_path(struct topology_vport*_vport_src,struct topolog
 	dijstra_reset_vports(vport_src);
 	vport_src->is_permanent=TRUE;
 	permanent_vport_header.dijstra_permanent_ptr=vport_src;
-
+	
 	/*2.iterate,until the last reachable vports found*/
 	while(TRUE){
 		least_cost_vport_header.dijstra_next_ecmp_ptr=NULL;
 		current_least_cost=-1;
 		/*2.1 find all the nodes which have the equal cost to src,keep them in the least_cost_vport_header link list*/
 		vport_permanent_ptr=permanent_vport_header.dijstra_permanent_ptr;
+		puts("");
 		while(vport_permanent_ptr){
+			
 			vport_adjacent_ptr=find_all_adjacent_vports(vport_permanent_ptr);
 			
 			for(;vport_adjacent_ptr;vport_adjacent_ptr=vport_adjacent_ptr->neighbour_ship_next_vport_ptr){
+				
 				if(vport_adjacent_ptr->is_permanent)/*already in the permanent set*/
 					continue;
 				if(vport_adjacent_ptr->cost_to_src==INFINITE_COST)/*unreachablle*/
 					continue;
+				
 				#if 0
 				if(current_least_cost==-1){/*first found legal node, link it into the least_cost_vport_header*/
 					current_least_cost==vport_adjacent_ptr->cost_to_src;
@@ -243,7 +257,7 @@ int dijstra_find_short_ecmp_path(struct topology_vport*_vport_src,struct topolog
 						vport_tmp1=vport_tmp1->dijstra_next_ecmp_ptr;
 					}
 					/*then we will mount this node*/
-
+					
 					current_least_cost=vport_adjacent_ptr->cost_to_src;
 					vport_adjacent_ptr->dijstra_next_ecmp_ptr=NULL;
 					least_cost_vport_header.dijstra_next_ecmp_ptr=vport_adjacent_ptr;
@@ -263,6 +277,7 @@ int dijstra_find_short_ecmp_path(struct topology_vport*_vport_src,struct topolog
 					if(vport_tmp2){
 					}else{/**/
 						vport_adjacent_ptr->dijstra_next_ecmp_ptr=least_cost_vport_header.dijstra_next_ecmp_ptr;
+						least_cost_vport_header.dijstra_next_ecmp_ptr=vport_adjacent_ptr;
 						vport_adjacent_ptr->dijstra_backward_edge_ptr=NULL;
 					}
 					edge_ptr=alloc_edge_element();
@@ -282,8 +297,49 @@ int dijstra_find_short_ecmp_path(struct topology_vport*_vport_src,struct topolog
 			break;/*no further steps more*/
 
 		/*2.2 chose the appropriate backward pathes and link them,then release allocated edge struct,then make them permanent*/
+		for(ecmp_vport_ptr=least_cost_vport_header.dijstra_next_ecmp_ptr;ecmp_vport_ptr;ecmp_vport_ptr=ecmp_vport_ptr->dijstra_next_ecmp_ptr){
+			vport_backward_ptr=NULL;
+			for(edge_tmp2=ecmp_vport_ptr->dijstra_backward_edge_ptr;edge_tmp2;edge_tmp2=edge_tmp2->next){
+				if(!vport_backward_ptr){
+					vport_backward_ptr=edge_tmp2->directed_vport;
+				}else if(vport_backward_ptr->upward_vport_count>edge_tmp2->directed_vport->upward_vport_count){
+					vport_backward_ptr=edge_tmp2->directed_vport;
+				}
+			}
+			/*found a backward vport with least reference count,then link them*/
+			ecmp_vport_ptr->dijstra_backward_ptr=vport_backward_ptr;
+			ecmp_vport_ptr->upward_vport_count++;
+			ecmp_vport_ptr->is_permanent=TRUE;
+			ecmp_vport_ptr->dijstra_permanent_ptr=permanent_vport_header.dijstra_permanent_ptr;
+			permanent_vport_header.dijstra_permanent_ptr=ecmp_vport_ptr;
+			printf("permanent:...%02x(%d)--->...%02x\n",ecmp_vport_ptr->vport_id[5],ecmp_vport_ptr->cost_to_src,ecmp_vport_ptr->dijstra_backward_ptr->vport_id[5]);
+			/*and then release thses edge structs*/
+			while(ecmp_vport_ptr->dijstra_backward_edge_ptr){
+				edge_tmp2=ecmp_vport_ptr->dijstra_backward_edge_ptr;
+				ecmp_vport_ptr->dijstra_backward_edge_ptr=edge_tmp2->next;
+				dealloc_edge_element(edge_tmp2);
+			}
+			
+			
+		}
 
 		/*2.3 recalculate all the temp nodes' cost to src which are neighbours of newly joint into permanent set */
+		for(ecmp_vport_ptr=least_cost_vport_header.dijstra_next_ecmp_ptr;ecmp_vport_ptr;ecmp_vport_ptr=ecmp_vport_ptr->dijstra_next_ecmp_ptr){
+			vport_tmp3=find_all_adjacent_vports(ecmp_vport_ptr);
+			
+			for(;vport_tmp3;vport_tmp3=vport_tmp3->neighbour_ship_next_vport_ptr){
+				if(vport_tmp3->is_permanent)
+					continue;
+				if((update_cost=cost_between_vports(vport_tmp3,ecmp_vport_ptr))>=INFINITE_COST)/*sanity check*/
+					continue;
+				update_cost+=ecmp_vport_ptr->cost_to_src;
+				if(update_cost<vport_tmp3->cost_to_src)
+					vport_tmp3->cost_to_src=update_cost;
+				
+				
+			}
+		}
+		
 	}
 	
 
@@ -367,13 +423,20 @@ int main()
 
 	copy_mac_address(vport1.vport_id,"\x12\x12\x12\x12\x12\x12");
 	copy_mac_address(vport2.vport_id,"\x12\x12\x12\x12\x12\x13");
-
 	int rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x5555,&vport2,0x5556,0x12);
-	printf("rc %d\n",rc);
+
 	copy_mac_address(vport1.vport_id,"\x12\x12\x12\x12\x12\x11");
 	copy_mac_address(vport2.vport_id,"\x12\x12\x12\x12\x12\x14");
 	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x5555,&vport2,0x5557,0x13);
-	printf("rc %d\n",rc);
+
+	copy_mac_address(vport1.vport_id,"\x12\x12\x12\x12\x12\x16");
+	copy_mac_address(vport2.vport_id,"\x12\x12\x12\x12\x12\x13");
+	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x5558,&vport2,0x5556,0x12);
+
+	copy_mac_address(vport1.vport_id,"\x12\x12\x12\x12\x12\x15");
+	copy_mac_address(vport2.vport_id,"\x12\x12\x12\x12\x12\x14");
+	rc=add_vport_node_pairs_into_topology(vport_stub,domain_stub,device_stub,&device_head,&domain_head,&vport1,0x5558,&vport2,0x5557,0x13);
+
 
 	struct topology_vport *vport1_ptr;
 	struct topology_vport *vport2_ptr;
@@ -388,22 +451,8 @@ int main()
 	vport3_ptr=index_hash_element(vport_stub,&vport1,STUB_TYPE_VPORT);
 	copy_mac_address(vport1.vport_id,"\x12\x12\x12\x12\x12\x14");
 	vport4_ptr=index_hash_element(vport_stub,&vport1,STUB_TYPE_VPORT);
-	dijstra_reset_vports(vport1_ptr);
-
-	struct topology_vport *hdr=find_all_neighbours(vport3_ptr);//find_all_vports_in_the_same_chassis(vport4_ptr);
-	while(hdr){
-
-		printf("0x%x(%02x)\n",hdr->cost_to_src,hdr->vport_id[5]);
-		hdr=hdr->neighbour_ship_next_vport_ptr;
-	}
-	int idx=0;
-	struct edge_str *str;
-	for(idx=0;idx<5;idx++){
-		str=alloc_edge_element();
-		//dealloc_edge_element(str);
-		printf("%llx\n",str);
-		}
-	dealloc_edge_element(str);
-	//dijstra_init_vports();
+	
+	dijstra_find_short_ecmp_path(vport2_ptr,vport4_ptr);
+	printf("%d\n",debug_cnt);
 	return 0;
 }
