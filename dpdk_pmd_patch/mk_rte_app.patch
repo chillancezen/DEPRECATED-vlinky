@@ -1,0 +1,11 @@
+--- /mnt/projects/dpdk/mk/rte.app.mk	2015-12-18 11:43:50.831308500 +0800
++++ /home/jenkinzh/dpdk-2.2.0/mk/rte.app.mk	2016-01-15 12:50:22.977267001 +0800
+@@ -154,7 +154,7 @@
+ _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_AF_PACKET)  += -lrte_pmd_af_packet
+ _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_NULL)       += -lrte_pmd_null
+ _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_QAT)        += -lrte_pmd_qat
+-
++_LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_VLINKY)       += -lrte_pmd_vlinky
+ # AESNI MULTI BUFFER is dependent on the IPSec_MB library
+ _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_AESNI_MB)   += -lrte_pmd_aesni_mb
+ _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_AESNI_MB)   += -L$(AESNI_MULTI_BUFFER_LIB_PATH) -lIPSec_MB

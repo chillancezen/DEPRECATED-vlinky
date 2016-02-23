@@ -1,0 +1,14 @@
+--- /mnt/projects/dpdk/config/common_linuxapp	2015-12-18 11:43:45.473237100 +0800
++++ /home/jenkinzh/dpdk-2.2.0/config/common_linuxapp	2016-01-15 12:53:00.018183503 +0800
+@@ -295,7 +295,10 @@
+ #
+ # Compile software PMD backed by PCAP files
+ #
+-CONFIG_RTE_LIBRTE_PMD_PCAP=n
++CONFIG_RTE_LIBRTE_PMD_PCAP=y
++
++#compile my own PMD driver which I name VLINKY
++CONFIG_RTE_LIBRTE_PMD_VLINKY=y
+ 
+ #
+ # Compile link bonding PMD library
