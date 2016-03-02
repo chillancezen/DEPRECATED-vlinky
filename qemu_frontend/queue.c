@@ -1,4 +1,6 @@
 #include "queue.h"
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 
 int initialize_queue(void *buffer,int size,int queue_ele_nr)
 {
@@ -50,9 +52,10 @@ int dequeue_single(struct queue_stub *stub,struct queue_element*ele)
 	stub->front_ptr=(stub->front_ptr+1)%(stub->ele_num+1);
 	return 0;
 }
-/*return value is the number oflelment that has been commited*/
+/*return value is the number oflelment that has been commited,multi-thread not safe*/
 int enqueue_bulk(struct queue_stub *stub,struct queue_element **ele_arr,int length)
 {
+	#if 0
 	int idx=0;
 	int rc;
 	for(idx=0;idx<length;idx++){
@@ -61,10 +64,27 @@ int enqueue_bulk(struct queue_stub *stub,struct queue_element **ele_arr,int leng
 			break;
 	}
 	return idx;
+	#else
+	int quantum=0;
+	int idx=0;
+	quantum=queue_quantum(stub);
+#ifdef __QEMU_CONTEXT
+	assert(quantum>=0);
+#endif
+	quantum=MIN(quantum,length);
+	for(idx=0;idx<quantum;idx++){
+		stub->records[(stub->rear_ptr+idx)%(stub->ele_num+1)].rte_pkt_offset=ele_arr[idx]->rte_pkt_offset;
+		stub->records[(stub->rear_ptr+idx)%(stub->ele_num+1)].rte_data_offset=ele_arr[idx]->rte_data_offset;
+	}
+	WRITE_MEM_WB();
+	stub->rear_ptr=(stub->rear_ptr+quantum)%(stub->ele_num+1);
+	return quantum;
+	#endif 
 }
 
 int dequeue_bulk(struct queue_stub * stub,struct queue_element **ele_arr,int max_length)
 {	
+	#if 0
 	int idx=0;
 	int rc=0;
 	for(idx=0;idx<max_length;idx++){
@@ -73,4 +93,21 @@ int dequeue_bulk(struct queue_stub * stub,struct queue_element **ele_arr,int max
 			break;
 	}
 	return idx;
+	#else
+	int quantum=0;
+	int idx;
+	quantum=stub->ele_num-queue_quantum(stub);
+	#ifdef __QEMU_CONTEXT
+	assert(quantum>=0);
+	#endif
+	quantum=MIN(quantum,max_length);
+	for(idx=0;idx<quantum;idx++){
+		ele_arr[idx]->rte_pkt_offset=stub->records[(stub->front_ptr+idx)%(stub->ele_num+1)].rte_pkt_offset;
+		ele_arr[idx]->rte_data_offset=stub->records[(stub->front_ptr+idx)%(stub->ele_num+1)].rte_data_offset;
+	}
+	WRITE_MEM_WB();
+	stub->front_ptr=(stub->front_ptr+quantum)%(stub->ele_num+1);
+	return quantum;
+	#endif
+	
 }

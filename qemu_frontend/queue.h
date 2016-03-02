@@ -2,18 +2,21 @@
 for simplicity,here it's a single producer and single consumer queue
 here we begin
 */
+#define __QEMU_CONTEXT
 
 #if 0
 #include <rte_atomic.h>
 typedef long long offset_t  ;/*exact 8-bytesss,theses should be platform dependent*/
 typedef int  my_int_32;
 #define WRITE_MEM_WB() rte_wmb()
-#endif
+#else 
 #include<qemu/atomic.h>
+#include <assert.h>
 typedef long long offset_t ;
 typedef int my_int32;
 typedef int  my_int_32;
 #define WRITE_MEM_WB() smp_wmb()
+#endif
 
 
 #pragma pack(1)
