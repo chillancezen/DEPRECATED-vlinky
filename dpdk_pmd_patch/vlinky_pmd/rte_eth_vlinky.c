@@ -16,6 +16,10 @@
 
 #include "shm_util.h"
 #include "queue.h"
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
@@ -23,10 +27,14 @@
 #define MAX_TX_BURST_LEN 32 /*the same burst size as RX_BURST size*/
 #define ETH_VLINKY_ARG_NUM_QUEUES "queues"
 #define ETH_VLINKY_ARG_SHM_FILE "shm"
+#define ETH_VLINKY_ARG_QUEUE_LENGTH "queue_length"
+#define ETH_VLINKY_ARG_LINK_INDEX "link_index"
+
 
 long long virt2offset(void* vaddr);
 void *offset2virt(long long offset);
 struct pmd_vlinky_channel{
+	
 	struct rte_mempool * pool;
 	int port_id;
 	int channel_id;/*corresponding to queue_id of RX/TX callback function of DPDK API*/
@@ -34,7 +42,13 @@ struct pmd_vlinky_channel{
 	struct queue_stub * free_queue_stub;/*for pmd,it's consumer*/
 	struct queue_stub * tx_queue_stub;/*for pmd,it's consumer*/
 	struct queue_stub * alloc_queue_stub;/*for pmd,it;s produer*/
-	
+	int fd_msi_x;
+	int link_index;
+
+	int xmit_shreshold;
+	int pending_xmited;
+	uint64_t last_msix_request;
+	uint64_t xmit_timeout;
 };
 struct pmd_vlinky_private{
 	int nr_queues;/*this is the channel numbers of a vlink,I SHOULD call them n_channels*/
@@ -44,12 +58,15 @@ struct pmd_vlinky_private{
 	int shm_size;
 	struct queue_stub** queue_stub_array;
 	struct pmd_vlinky_channel * channles;/*this is the really DPDK pmd queues*/
-
+	int link_index;
+	int queue_length;
 };
 static const char* valid_arguments[]=
 {
 	ETH_VLINKY_ARG_NUM_QUEUES,
 	ETH_VLINKY_ARG_SHM_FILE,
+	ETH_VLINKY_ARG_QUEUE_LENGTH,
+	ETH_VLINKY_ARG_LINK_INDEX,
 	NULL
 };
 static struct rte_eth_link vlink_pmd_link={
@@ -58,7 +75,7 @@ static struct rte_eth_link vlink_pmd_link={
 	.link_status=0
 };
 static const char* drivername="vlinky driver";
-#define DEFAULT_QUEUE_LENGTH (10240+1)
+/*#define DEFAULT_QUEUE_LENGTH (10240+1)*/
 static unsigned char mac_quantum=0x1;/*note in most cases ,there will be no more than 255 VMs in a host */
 
 
@@ -99,12 +116,28 @@ static int argument_callback_shm(const char * key,const char * value,void * extr
 	sprintf(extra,"%s",value);
 	return 0;
 }
+
+static int argument_callback_queue_length(const char * key,const char * value,void * extra)
+{
+	int queue_length=atoi(value);
+	*((int*)extra)=queue_length;
+	return 0;
+}
+
+static int argument_callback_link_index(const char * key,const char * value,void * extra)
+{
+
+	*((int*)extra)=atoi(value);
+	return 0;
+}
+
 static int vlinky_pmd_dev_start(struct rte_eth_dev *dev)
 {
 	printf("[x]dev start:%s\n",dev->data->name);
 	dev->data->dev_link.link_status=1;
 	return 0;
 }
+
 static void vlinky_pmd_dev_stop(struct rte_eth_dev * dev)
 {
 	printf("[x]dev stop:%s\n",dev->data->name);
@@ -240,11 +273,12 @@ static uint16_t vlinky_dev_rx(void *queue,struct rte_mbuf**bufs,uint16_t nr_pkts
 	for(idx=alloc_rc;idx<allocate_quantum;idx++){
 		rte_pktmbuf_free(offset2virt(rx_packets_buff_ptr[idx]->rte_pkt_offset));
 	}
-	
+	#if 0
 	if(last!=queue_quantum(channel->alloc_queue_stub)){
 		printf("[x]:%lld\n",queue_quantum(channel->alloc_queue_stub));
 		last=queue_quantum(channel->alloc_queue_stub);
 	}
+	#endif
 	return rx_packets;
 }
 static uint16_t vlinky_dev_tx(void *queue,struct rte_mbuf**bufs,uint16_t nr_pkts)
@@ -267,6 +301,8 @@ static uint16_t vlinky_dev_tx(void *queue,struct rte_mbuf**bufs,uint16_t nr_pkts
 	int idx;
 	int quantum;
 	int tx_quantum;
+	uint64_t current_tsc;
+	char buffer[4];
 	struct pmd_vlinky_channel *channel=queue;
 	struct queue_element tx_packets_buff[MAX_TX_BURST_LEN];
 	struct queue_element * tx_packets_buff_ptr[MAX_TX_BURST_LEN];
@@ -281,6 +317,23 @@ static uint16_t vlinky_dev_tx(void *queue,struct rte_mbuf**bufs,uint16_t nr_pkts
 		//printf("[x]%d tx :%llx %llx\n",idx,bufs[idx],bufs[idx]->buf_addr);
 	}
 	tx_quantum=enqueue_bulk(channel->rx_queue_stub,tx_packets_buff_ptr,quantum);
+
+	/*notify msi-x interrupt of the queues*/
+	channel->pending_xmited+=tx_quantum;
+	current_tsc=rte_rdtsc();
+
+	/*this triggering logic maybe optimizted later*/
+	if((channel->pending_xmited>=channel->xmit_shreshold) ||((channel->pending_xmited)&(channel->xmit_timeout>(current_tsc-channel->last_msix_request)))){
+
+		
+		buffer[0]=channel->link_index;
+		buffer[1]=channel->channel_id;
+		buffer[2]=0;
+		printf("msi-x:%d\n",channel->pending_xmited);
+		write(channel->fd_msi_x,buffer,4);
+		channel->pending_xmited=0;
+		channel->last_msix_request=current_tsc;
+	}
 	
 	return tx_quantum;
 }
@@ -304,16 +357,27 @@ static int rte_pmd_vlinky_devinit(const char*name,const char *params)
 	kvlist=rte_kvargs_parse(params,valid_arguments);
 	if(kvlist==NULL)
 		return -1;
+	
 	int nr_qeueues;
+	
 	char shm_file[256];
+	int queue_length;
+	int link_index;
 	rc=rte_kvargs_process(kvlist,ETH_VLINKY_ARG_NUM_QUEUES,argument_callback_queues,&nr_qeueues);
 	if(rc<0)
 		goto list_free;
 	rc=rte_kvargs_process(kvlist,ETH_VLINKY_ARG_SHM_FILE,argument_callback_shm,shm_file);
 	if(rc<0)
 		goto list_free;
+	
+	rc=rte_kvargs_process(kvlist,ETH_VLINKY_ARG_QUEUE_LENGTH,argument_callback_queue_length,&queue_length);
+	if(rc<0)
+		goto list_free;
+	rc=rte_kvargs_process(kvlist,ETH_VLINKY_ARG_LINK_INDEX,argument_callback_link_index,&link_index);
+	if(rc<0)
+		goto list_free;
 	/*1.steup local pmd eth device*/
-
+	
 	pmd_dev=rte_eth_dev_allocate(name,RTE_ETH_DEV_VIRTUAL);
 	if(!pmd_dev){
 		ret=-1;
@@ -325,7 +389,8 @@ static int rte_pmd_vlinky_devinit(const char*name,const char *params)
 	pmd_pri=rte_zmalloc(NULL,sizeof(struct pmd_vlinky_private),0);
 	if(!pmd_pri)
 		goto data_free;
-
+	pmd_pri->link_index=link_index;
+	pmd_pri->queue_length=queue_length;
 	pmd_pri->nr_queues=nr_qeueues;
 	
 	pmd_pri->mac_address.addr_bytes[0]=0x0;
@@ -362,7 +427,7 @@ static int rte_pmd_vlinky_devinit(const char*name,const char *params)
 	/*2.setup control channels shared memory */
 	
 	pmd_pri->nr_total_queues=pmd_pri->nr_queues*4;/*rx/alloc/free/tx tuple*/
-	pmd_pri->shm_size=calculate_shm_size(pmd_pri->nr_total_queues,DEFAULT_QUEUE_LENGTH);
+	pmd_pri->shm_size=calculate_shm_size(pmd_pri->nr_total_queues,(pmd_pri->queue_length+1));
 	pmd_pri->shm_base=shm_alloc(shm_file,pmd_pri->shm_size);
 	
 	if(!pmd_pri->shm_base)
@@ -374,9 +439,9 @@ static int rte_pmd_vlinky_devinit(const char*name,const char *params)
 	
 	/*initialize these native queues data structure*/
 	for(idx=0;idx<pmd_pri->nr_total_queues;idx++){
-		pmd_pri->queue_stub_array[idx]=(struct queue_stub *)(idx*(sizeof(struct queue_stub)+DEFAULT_QUEUE_LENGTH*(sizeof(struct queue_element)))+(unsigned char *)pmd_pri->shm_base);
-		tmp_length=(sizeof(struct queue_stub)+DEFAULT_QUEUE_LENGTH*(sizeof(struct queue_element)));
-		rc=initialize_queue(pmd_pri->queue_stub_array[idx],tmp_length,(DEFAULT_QUEUE_LENGTH-1));/*actual queue length equals DEFAULT_QUEUE_LENGTH minus one */
+		pmd_pri->queue_stub_array[idx]=(struct queue_stub *)(idx*(sizeof(struct queue_stub)+(pmd_pri->queue_length+1)*(sizeof(struct queue_element)))+(unsigned char *)pmd_pri->shm_base);
+		tmp_length=(sizeof(struct queue_stub)+(pmd_pri->queue_length+1)*(sizeof(struct queue_element)));
+		rc=initialize_queue(pmd_pri->queue_stub_array[idx],tmp_length,((pmd_pri->queue_length+1)-1));/*actual queue length equals DEFAULT_QUEUE_LENGTH minus one */
 		if(rc)
 			goto priv_queue_free;
 	}
@@ -394,6 +459,31 @@ static int rte_pmd_vlinky_devinit(const char*name,const char *params)
 	}
 	for(idx=0;idx<pmd_pri->nr_queues;idx++)
 		printf("[vlinky]:%d\n",pmd_pri->channles[idx].channel_id);
+	/*initialize msi-x fd per channel*/
+	struct sockaddr_un address;
+	address.sun_family = AF_UNIX;
+	char buffer[4];
+	strcpy(address.sun_path, "/tmp/msi_x_server.sock");
+	for(idx=0;idx<pmd_pri->nr_queues;idx++){
+		pmd_pri->channles[idx].fd_msi_x=socket(AF_UNIX, SOCK_STREAM, 0);
+		rc=connect(pmd_pri->channles[idx].fd_msi_x, (struct sockaddr *)&address, sizeof(address));
+		if(rc<0){
+			printf("[x]can not connect to msi-x server\n");
+			goto priv_queue_free;
+		}
+		buffer[0]=pmd_pri->link_index;
+		buffer[1]=idx;
+		buffer[2]=0;
+		buffer[3]=0;
+		
+		write(pmd_pri->channles[idx].fd_msi_x,buffer,4);
+		pmd_pri->channles[idx].link_index=link_index;
+		pmd_pri->channles[idx].pending_xmited=0;
+		pmd_pri->channles[idx].last_msix_request=rte_rdtsc();
+		pmd_pri->channles[idx].xmit_shreshold=pmd_pri->queue_length/10;/*this is the quanta,with which ,a interrupt will be triggered*/
+		pmd_pri->channles[idx].xmit_timeout=(rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * 200;/*500us*/
+		
+	}
 	
 	
 	list_free:
