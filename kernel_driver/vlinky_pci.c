@@ -3,6 +3,10 @@
 #include <linux/interrupt.h>
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
+#include <linux/etherdevice.h>
+#include <linux/netdevice.h>
+#include <linux/rtnetlink.h>
+
 #include "queue.h"
 
 #define VENDOR_ID 0xcccc
@@ -13,6 +17,7 @@ struct pci_device_id vlinky_id_tbl[]={
 	{0}
 
 };
+
 struct channel_private{
 	struct queue_stub * rx_stub;
 	struct queue_stub * free_stub;
@@ -23,6 +28,7 @@ struct link_private{
 	int link_index;
 	int link_channels;
 	struct channel_private *channels_array;
+	struct vlinky_adapter * adapter_ptr;/*pointer back to vlinky adapter,because we have not other way to reference them when releasing pci device */
 };
 enum vlink_bar0_register{/*io ports registers which reside in BAR 0*/
 	 VLINKY_DEVICE_STATUS=0,
@@ -65,10 +71,22 @@ struct pci_private{
 	unsigned int bar3_reg_addr;
 	unsigned int bar3_reg_size;
 	void * __iomem bar3_mapped_addr;
+
+	unsigned int bar2_reg_addr;
+	unsigned int bar2_reg_size;
+	void * __iomem bar2_mapped_addr;
+
+	/*bar2 region context*/
+};
+struct vlinky_adapter{
+	struct pci_private *pci_pri;
+	struct net_device *netdev;
+	
+	int link_index;
 	
 };
 
-struct pci_private * global_pci_private=NULL;
+
 irqreturn_t vlinky_pci_interrupt_handler(int irq,void*dev_instance)
 {
 	printk("vlinky irq:%d\n",irq);
@@ -87,7 +105,7 @@ int request_msix_vectors(struct pci_private *g_pci_pri,int nvectors)
 	//g_pci_pri->msix_name_arr=kmalloc(g_pci_pri->nvectors*sizeof(char*),GFP_KERNEL);
 	for(idx=0;idx<nvectors;idx++){
 		g_pci_pri->msix_entries[idx].entry=idx;	
-		sprintf(g_pci_pri->msix_name[idx],"vlinky-config",idx);
+		sprintf(g_pci_pri->msix_name[idx],"vlinky-config%d",idx);
 	}
 	g_pci_pri->pci_msxi_enabled=0;
 	
@@ -122,14 +140,51 @@ void release_msix_vectors(struct pci_private *g_pci_pri)
 	if(g_pci_pri->msix_name)
 		kfree(g_pci_pri->msix_name);
 }
+
+int vlinky_netdevice_open(struct net_device *netdev)
+{
+
+	return 0;
+}
+int vlinky_netdevice_close(struct net_device *netdev)
+{
+
+	return 0;
+}
+netdev_tx_t vlinky_netdevice_xmit(struct sk_buff*skb,struct net_device *netdev)
+{
+
+	kfree_skb(skb);
+	
+	return NETDEV_TX_OK;
+}
+u16 vlinky_netdevice_select_queue(struct net_device* netdev,struct sk_buff * skb,void * accel_priv,select_queue_fallback_t fallback)
+{
+	return 0;
+}
+struct rtnl_link_stats64 *vlinky_netdevice_stat64(struct net_device *netdev,struct rtnl_link_stats64 *stats)
+{
+	memset(stats,0x0,sizeof(struct rtnl_link_stats64));
+	return stats;
+}
+struct net_device_ops vlinky_netdev_ops={
+	.ndo_open=vlinky_netdevice_open,
+	.ndo_stop=vlinky_netdevice_close,
+	.ndo_start_xmit=vlinky_netdevice_xmit,
+	.ndo_select_queue=vlinky_netdevice_select_queue,
+	.ndo_get_stats64=vlinky_netdevice_stat64,
+	
+};
 int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 {
 	
 	int rc;
 	int idx,idx_tmp;
+	struct net_device *netdev_tmp;
+	struct vlinky_adapter *adapter;
 	struct pci_private*private=kmalloc(sizeof(struct pci_private),GFP_KERNEL);
 	memset(private,0x0,sizeof(struct pci_private));
-	global_pci_private=private;
+	
 	private->pdev=pdev;
 
 	
@@ -174,7 +229,7 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 		printk("[x]link %d has %d channels\n",idx,private->link_pri_arr[idx].link_channels);
 	}
 
-	/*3 initialize bar3 region*/
+	/*3 request bar3 region resource*/
 	private->bar3_reg_addr=pci_resource_start(pdev,3);
 	private->bar3_reg_size=pci_resource_len(pdev,3);
 	private->bar3_mapped_addr=pci_ioremap_bar(pdev,3);
@@ -203,26 +258,13 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 				,queue_quantum(private->link_pri_arr[idx].channels_array[idx_tmp].alloc_stub));
 		}
 	}
-/*
-	writel(1,private->bar0_mapped_addr+VLINKY_LINK_INDEX);
-	writel(1,private->bar0_mapped_addr+VLINKY_CHANNEL_INDEX);
-	
-	printk("[x] meeeow:%d\n",readl(private->bar0_mapped_addr+VLINKY_CHANNEL_RX_OFFSET));
-
-	
-	printk("[x] meeeow:%d\n",readl(private->bar0_mapped_addr+VLINKY_CHANNEL_FREE_OFFSET));
-
-	
-	printk("[x] meeeow:%d\n",readl(private->bar0_mapped_addr+VLINKY_CHANNEL_TX_OFFSET));
-
-	
-	printk("[x] meeeow:%d\n",readl(private->bar0_mapped_addr+VLINKY_CHANNEL_ALLOC_OFFSET));
-
-	
-
-	printk("[x] size :%d %d\n",sizeof(struct queue_element),sizeof(struct queue_stub));
-
-	*/
+	/*2 request bar2 region resource*/
+	private->bar2_reg_addr=pci_resource_start(pdev,2);
+	private->bar2_reg_size=pci_resource_len(pdev,2);
+	private->bar2_mapped_addr=pci_ioremap_bar(pdev,2);
+	printk("[x]bar 2:reg addr:%llx\n",private->bar2_reg_addr);
+	printk("[x]bar 2:reg len :%lld\n",private->bar2_reg_size);
+	printk("[x]bar 2:map addr:%llx\n",private->bar2_mapped_addr);
 	
 	/*1.read register and get vectore count and request msi-x interrupt,here we only support MSI-X interrupt mode*/
 	
@@ -232,6 +274,33 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 	pci_set_master(pdev);/*I do not know why this is essential ,but without this ,the IRQ message can not be routed correctly ,this issue confused me for several days*/
 
 	
+	pci_set_drvdata(pdev,private);
+
+	/*next we will allocate ethernet device for multiple queues*/
+	for(idx=0;idx<private->nr_links;idx++){
+		
+		netdev_tmp=alloc_etherdev_mq(sizeof(struct vlinky_adapter),private->link_pri_arr[idx].link_channels);
+		if(!netdev_tmp)
+			goto pci_resource_release;
+		
+		adapter=netdev_priv(netdev_tmp);
+		adapter->link_index=private->link_pri_arr[idx].link_index;
+		adapter->netdev=netdev_tmp;
+		adapter->pci_pri=private;
+		adapter->netdev->netdev_ops=&vlinky_netdev_ops;
+		private->link_pri_arr[idx].adapter_ptr=adapter;/*reference back ,this is critical*/
+		strcpy(netdev_tmp->name,"vlinky%d");
+		
+		netif_set_real_num_rx_queues(adapter->netdev,private->link_pri_arr[idx].link_channels);
+		netif_set_real_num_tx_queues(adapter->netdev,private->link_pri_arr[idx].link_channels);
+		rc=register_netdev(adapter->netdev);
+		if(rc){
+			
+			goto pci_resource_release;
+		}
+		
+		printk("[x] netdev success:%d\n",adapter->link_index);
+	}
 	
 	#if 0
 	bar2_ioaddr=pci_resource_start(pdev,2);
@@ -272,6 +341,17 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 	#endif 
 	
 	return 0;
+	pci_resource_release:
+	if(private->link_pri_arr){
+		for(idx=0;idx<private->nr_links;idx++)
+			kfree(private->link_pri_arr[idx].channels_array);
+		kfree(private->link_pri_arr);
+		private->link_pri_arr=NULL;
+	}
+	if(private->bar0_mapped_addr)
+		pci_iounmap(private->pdev,private->bar0_mapped_addr);
+	if(private->bar3_mapped_addr)
+		pci_iounmap(private->pdev,private->bar3_mapped_addr);
 	pci_release:
 		pci_release_regions(pdev);
 	pci_disable:
@@ -283,15 +363,24 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 }
 void vlinky_pci_remove(struct pci_dev *pdev)
 {
-	if(global_pci_private->link_pri_arr){
-		kfree(global_pci_private->link_pri_arr);
-		global_pci_private->link_pri_arr=NULL;
+	int idx;
+	struct pci_private * private=pci_get_drvdata(pdev);
+	for(idx=0;idx<private->nr_links;idx++){
+		unregister_netdev(private->link_pri_arr[idx].adapter_ptr->netdev);
+		free_netdev(private->link_pri_arr[idx].adapter_ptr->netdev);
 	}
-	if(global_pci_private->bar0_mapped_addr)
-		pci_iounmap(global_pci_private->pdev,global_pci_private->bar0_mapped_addr);
-	if(global_pci_private->bar3_mapped_addr)
-		pci_iounmap(global_pci_private->pdev,global_pci_private->bar3_mapped_addr);
-	release_msix_vectors(global_pci_private);
+	
+	if(private->link_pri_arr){
+		for(idx=0;idx<private->nr_links;idx++)
+			kfree(private->link_pri_arr[idx].channels_array);
+		kfree(private->link_pri_arr);
+		private->link_pri_arr=NULL;
+	}
+	if(private->bar0_mapped_addr)
+		pci_iounmap(private->pdev,private->bar0_mapped_addr);
+	if(private->bar3_mapped_addr)
+		pci_iounmap(private->pdev,private->bar3_mapped_addr);
+	release_msix_vectors(private);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	
