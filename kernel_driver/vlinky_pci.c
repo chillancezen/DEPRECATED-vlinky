@@ -19,6 +19,10 @@ struct pci_device_id vlinky_id_tbl[]={
 };
 
 struct channel_private{
+	int channel_index;
+	struct vlinky_adapter *adapter_ptr;/*still need to reference back*/
+	int interrupt_requested;/*an indicator*/
+	
 	struct queue_stub * rx_stub;
 	struct queue_stub * free_stub;
 	struct queue_stub * tx_stub;
@@ -89,7 +93,12 @@ struct vlinky_adapter{
 
 irqreturn_t vlinky_pci_interrupt_handler(int irq,void*dev_instance)
 {
-	printk("vlinky irq:%d\n",irq);
+	struct channel_private *channel=dev_instance;
+	struct vlinky_adapter *adapter=channel->adapter_ptr;
+	struct pci_private *pci_pri=adapter->pci_pri;
+	struct net_device *netdev=adapter->netdev;
+	
+	printk("vlinky irq:%d %d.%d\n",irq,adapter->link_index,channel->channel_index);
 	
 	return IRQ_HANDLED;
 }
@@ -116,7 +125,7 @@ int request_msix_vectors(struct pci_private *g_pci_pri,int nvectors)
 	}
 	g_pci_pri->pci_msxi_enabled=!0;
 	
-	#if 1
+	#if 0 /*currently we postpone to the moment when the related device is open*/
 	for(idx=0;idx<g_pci_pri->nvectors;idx++){
 		
 		rc=request_irq(g_pci_pri->msix_entries[idx].vector,vlinky_pci_interrupt_handler,0/*even not shared*/,g_pci_pri->msix_name[idx],NULL);
@@ -129,9 +138,11 @@ int request_msix_vectors(struct pci_private *g_pci_pri,int nvectors)
 void release_msix_vectors(struct pci_private *g_pci_pri)
 {
 	int idx;
+	#if 0
 	for(idx=0;idx<g_pci_pri->nvectors;idx++){
 		free_irq(g_pci_pri->msix_entries[idx].vector,NULL);
 	}
+	#endif
 	
 	if(g_pci_pri->pci_msxi_enabled)
 		pci_disable_msix(g_pci_pri->pdev);
@@ -143,11 +154,46 @@ void release_msix_vectors(struct pci_private *g_pci_pri)
 
 int vlinky_netdevice_open(struct net_device *netdev)
 {
+	int rc;
+	int idx=0;
+	int nvector_base=0;
+	int nvector_count=0;
 
+	/*request interrupt whenever the device is open,also release irq whenever the device is closed */
+	struct vlinky_adapter *adapter=netdev_priv(netdev);
+	struct pci_private *pci_pri=adapter->pci_pri;
+	for(idx=0;idx<adapter->link_index;idx++)
+		nvector_base+=pci_pri->link_pri_arr[idx].link_channels;
+	nvector_count=pci_pri->link_pri_arr[adapter->link_index].link_channels;
+	printk("[x]netdev open:%s(msi-x base:%d count:%d)\n",netdev->name,nvector_base,nvector_count);
+	for(idx=nvector_base;idx<nvector_base+nvector_count;idx++){
+		sprintf(pci_pri->msix_name[idx],"vlinky-channel%d.%d",adapter->link_index,idx-nvector_base);
+	
+		rc=request_irq(pci_pri->msix_entries[idx].vector,vlinky_pci_interrupt_handler,0,pci_pri->msix_name[idx],&(pci_pri->link_pri_arr[adapter->link_index].channels_array[idx-nvector_base]));
+		/*note that,the interrup handler argument is the channel_private*/
+		pci_pri->link_pri_arr[adapter->link_index].channels_array[idx-nvector_base].interrupt_requested=!rc;
+	}
+	
 	return 0;
 }
 int vlinky_netdevice_close(struct net_device *netdev)
 {
+	int rc;
+	int idx=0;
+	int nvector_base=0;
+	int nvector_count=0;
+	struct vlinky_adapter *adapter=netdev_priv(netdev);
+	struct pci_private *pci_pri=adapter->pci_pri;
+	for(idx=0;idx<adapter->link_index;idx++)
+		nvector_base+=pci_pri->link_pri_arr[idx].link_channels;
+	nvector_count=pci_pri->link_pri_arr[adapter->link_index].link_channels;
+	printk("[x]netdev closed:%s(msi-x base:%d count:%d)\n",netdev->name,nvector_base,nvector_count);
+	for(idx=nvector_base;idx<nvector_base+nvector_count;idx++){
+		if(pci_pri->link_pri_arr[adapter->link_index].channels_array[idx-nvector_base].interrupt_requested){
+			free_irq(pci_pri->msix_entries[idx].vector,&(pci_pri->link_pri_arr[adapter->link_index].channels_array[idx-nvector_base]));
+		}
+	}
+
 
 	return 0;
 }
@@ -288,9 +334,13 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 		adapter->netdev=netdev_tmp;
 		adapter->pci_pri=private;
 		adapter->netdev->netdev_ops=&vlinky_netdev_ops;
-		private->link_pri_arr[idx].adapter_ptr=adapter;/*reference back ,this is critical*/
+		private->link_pri_arr[idx].adapter_ptr=adapter;/*link reference back ,this is critical*/
 		strcpy(netdev_tmp->name,"vlinky%d");
-		
+		for(idx_tmp=0;idx_tmp<private->link_pri_arr[idx].link_channels;idx_tmp++){
+			private->link_pri_arr[idx].channels_array[idx_tmp].channel_index=idx_tmp;
+			private->link_pri_arr[idx].channels_array[idx_tmp].adapter_ptr=adapter;/*channel reference back ,this is critical*/
+			private->link_pri_arr[idx].channels_array[idx_tmp].interrupt_requested=0;
+		}
 		netif_set_real_num_rx_queues(adapter->netdev,private->link_pri_arr[idx].link_channels);
 		netif_set_real_num_tx_queues(adapter->netdev,private->link_pri_arr[idx].link_channels);
 		rc=register_netdev(adapter->netdev);
