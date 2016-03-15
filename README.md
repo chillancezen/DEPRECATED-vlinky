@@ -1,6 +1,6 @@
 # vlinky
 special customization for NFV-load  requirments
-#####1st vlinky netdevice part
+#####1st vlinky kernel-driver part
 ```sh
 root@chillancezen-virtual-machine:/mnt/projects/vlinky/vlinky-pci# make ;make install 
 root@chillancezen-virtual-machine:/mnt/projects/vlinky/vlinky-pci# dmesg |tail -28
