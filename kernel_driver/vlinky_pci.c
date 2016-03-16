@@ -17,11 +17,34 @@ struct pci_device_id vlinky_id_tbl[]={
 	{0}
 
 };
+#pragma pack(1)
+/*this is great ,we onluy calculate the offset of interested fields of an struct*/
+
+struct dpdk_rte_mbuf{
+	union {
+		unsigned char dummy0[128];
+		struct {
+			unsigned char dummy1[0];
+			void * buf_addr;/*offset is 0*/
+		};
+		struct{
+			unsigned char dummy2[16];
+			uint16_t buf_len;
+			uint16_t data_off;
+		};
+		struct {
+			unsigned char dummy3[36];
+			uint32_t pkt_len;
+			uint16_t data_len;
+		};
+	}
+};
 
 struct channel_private{
 	int channel_index;
 	struct vlinky_adapter *adapter_ptr;/*still need to reference back*/
 	int interrupt_requested;/*an indicator*/
+	struct napi_struct  napi;/*every channel has one*/
 	
 	struct queue_stub * rx_stub;
 	struct queue_stub * free_stub;
@@ -97,8 +120,15 @@ irqreturn_t vlinky_pci_interrupt_handler(int irq,void*dev_instance)
 	struct vlinky_adapter *adapter=channel->adapter_ptr;
 	struct pci_private *pci_pri=adapter->pci_pri;
 	struct net_device *netdev=adapter->netdev;
+
 	
-	printk("vlinky irq:%d %d.%d\n",irq,adapter->link_index,channel->channel_index);
+	/*printk("vlinky irq:%d %d.%d %d %llx\n",irq,adapter->link_index,channel->channel_index
+		,napi_schedule_prep(&channel->napi),&channel->napi);*/
+
+	/*before we start to poll ,need to disable interrupt for the given channel*/
+
+	
+	napi_schedule(&channel->napi);/*schedule the poll api*/
 	
 	return IRQ_HANDLED;
 }
@@ -173,6 +203,11 @@ int vlinky_netdevice_open(struct net_device *netdev)
 		/*note that,the interrup handler argument is the channel_private*/
 		pci_pri->link_pri_arr[adapter->link_index].channels_array[idx-nvector_base].interrupt_requested=!rc;
 	}
+
+	
+	for(idx=0;idx<pci_pri->link_pri_arr[adapter->link_index].link_channels;idx++){
+		napi_enable(&(pci_pri->link_pri_arr[adapter->link_index].channels_array[idx].napi));
+	}
 	
 	return 0;
 }
@@ -193,7 +228,9 @@ int vlinky_netdevice_close(struct net_device *netdev)
 			free_irq(pci_pri->msix_entries[idx].vector,&(pci_pri->link_pri_arr[adapter->link_index].channels_array[idx-nvector_base]));
 		}
 	}
-
+	for(idx=0;idx<pci_pri->link_pri_arr[adapter->link_index].link_channels;idx++){
+		napi_disable(&(pci_pri->link_pri_arr[adapter->link_index].channels_array[idx].napi));
+	}
 
 	return 0;
 }
@@ -221,6 +258,14 @@ struct net_device_ops vlinky_netdev_ops={
 	.ndo_get_stats64=vlinky_netdevice_stat64,
 	
 };
+int vlinky_channel_poll(struct napi_struct *napi,int budget)
+{
+
+	printk("cute,,napi :%d\n",budget);
+	napi_complete(napi);
+	
+	return budget-1;
+}
 int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 {
 	
@@ -340,6 +385,9 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 			private->link_pri_arr[idx].channels_array[idx_tmp].channel_index=idx_tmp;
 			private->link_pri_arr[idx].channels_array[idx_tmp].adapter_ptr=adapter;/*channel reference back ,this is critical*/
 			private->link_pri_arr[idx].channels_array[idx_tmp].interrupt_requested=0;
+			netif_napi_add(adapter->netdev,&(private->link_pri_arr[idx].channels_array[idx_tmp].napi),vlinky_channel_poll,64);
+			//napi_enable(&(private->link_pri_arr[idx].channels_array[idx_tmp].napi));
+			
 		}
 		netif_set_real_num_rx_queues(adapter->netdev,private->link_pri_arr[idx].link_channels);
 		netif_set_real_num_tx_queues(adapter->netdev,private->link_pri_arr[idx].link_channels);
@@ -348,9 +396,10 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 			
 			goto pci_resource_release;
 		}
-		
+	
 		printk("[x] netdev success:%d\n",adapter->link_index);
 	}
+
 	
 	#if 0
 	bar2_ioaddr=pci_resource_start(pdev,2);
@@ -446,6 +495,7 @@ struct pci_driver vlinky_pci_driver={
 int vlinky_pci_init(void)
 {
 	int rc=pci_register_driver(&vlinky_pci_driver);
+	
 	printk("vlinkty_pci init\n");
 	return 0;
 }
@@ -458,6 +508,7 @@ void vlinky_pci_exit(void)
 
 module_init(vlinky_pci_init);
 module_exit(vlinky_pci_exit);
+
 
 MODULE_AUTHOR("jzheng from bjtu");
 MODULE_LICENSE("GPL");
