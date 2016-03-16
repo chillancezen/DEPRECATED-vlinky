@@ -2,6 +2,21 @@
 special customization for NFV-load  requirments
 #####1st vlinky kernel-driver part
 ```sh
+root@chillancezen-virtual-machine:~# lspci -vvv -n 
+... ....
+00:05.0 00ff: cccc:2222
+        Subsystem: 1af4:1100
+        Physical Slot: 5
+        Control: I/O+ Mem+ BusMaster- SpecCycle- MemWINV- VGASnoop- ParErr- Stepping- SERR+ FastB2B- DisINTx-
+        Status: Cap+ 66MHz- UDF- FastB2B- ParErr- DEVSEL=fast >TAbort- <TAbort- <MAbort- >SERR- <PERR- INTx-
+        Interrupt: pin B routed to IRQ 10
+        Region 0: Memory at febd3000 (32-bit, non-prefetchable) [size=256]
+        Region 1: Memory at febd4000 (32-bit, non-prefetchable) [size=4K]
+        Region 2: Memory at c0000000 (32-bit, prefetchable) [size=512M]
+        Region 3: Memory at e1000000 (32-bit, prefetchable) [size=8M]
+        Capabilities: [40] MSI-X: Enable- Count=6 Masked-
+                Vector table: BAR=1 offset=00000000
+                PBA: BAR=1 offset=00000800
 root@chillancezen-virtual-machine:/mnt/projects/vlinky/vlinky-pci# make ;make install 
 root@chillancezen-virtual-machine:/mnt/projects/vlinky/vlinky-pci# dmesg |tail -28
 [ 6757.652298] [x]bar 0:reg addr:febd3000
