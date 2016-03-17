@@ -11,7 +11,7 @@
 
 #define VENDOR_ID 0xcccc
 #define DEVICE_ID 0x2222
-
+#define DEFAULT_NAPI_BUDGET 64
 struct pci_device_id vlinky_id_tbl[]={
 	{VENDOR_ID,DEVICE_ID,PCI_ANY_ID,PCI_ANY_ID,0,0,0},
 	{0}
@@ -50,6 +50,7 @@ struct channel_private{
 	struct queue_stub * free_stub;
 	struct queue_stub * tx_stub;
 	struct queue_stub * alloc_stub;
+	struct queue_element * queue_buffer[DEFAULT_NAPI_BUDGET];
 };
 struct link_private{
 	int link_index;
@@ -259,9 +260,48 @@ struct net_device_ops vlinky_netdev_ops={
 	
 };
 int vlinky_channel_poll(struct napi_struct *napi,int budget)
-{
+{/*here we should limit ,frame longer than 1600(which should be enough for most overlay technology) is not supported*/
 
-	printk("cute,,napi :%d\n",budget);
+	
+	struct channel_private * channel=container_of(napi,struct channel_private,napi);
+	struct vlinky_adapter *adapter=channel->adapter_ptr;
+	void * dpdk_base=adapter->pci_pri->bar2_mapped_addr;
+	unsigned char * pkt_base;
+	
+	int ele_len=0;
+	int idx;
+	
+	struct dpdk_rte_mbuf * mbuf;
+	struct sk_buff *skb;
+	ele_len=dequeue_bulk(channel->rx_stub,channel->queue_buffer,DEFAULT_NAPI_BUDGET);
+	for(idx=0;idx<ele_len;idx++){
+		mbuf=(struct dpdk_rte_mbuf*)(channel->queue_buffer[idx]->rte_pkt_offset+(char*)dpdk_base);
+		mbuf->buf_addr=(void*)(channel->queue_buffer[idx]->rte_data_offset+(char*)dpdk_base);
+		pkt_base=mbuf->data_off+(unsigned char*)mbuf->buf_addr;
+		/*1.check frame size,for simplicity ,I do not want to see Jumbo frame*/
+		if(mbuf->data_len>1600)
+			continue;
+		/*2.allocate sk_buff ,fill it ,and give it to Linux stack*/
+		
+		printk("%d\n",channel->queue_buffer[idx]->rte_data_offset-channel->queue_buffer[idx]->rte_pkt_offset);
+		printk("%02x:%02x:%02x:%02x:%02x:%02x  %02x:%02x:%02x:%02x:%02x:%02x %02x%02x\n",pkt_base[0],
+			pkt_base[1],
+			pkt_base[2],
+			pkt_base[3],
+			pkt_base[4],
+			pkt_base[5],
+			pkt_base[6],
+			pkt_base[7],
+			pkt_base[8],
+			pkt_base[9],
+			pkt_base[10],
+			pkt_base[11],
+			pkt_base[12],
+			pkt_base[13]);
+	}
+
+	if(ele_len)
+		enqueue_bulk(channel->free_stub,channel->queue_buffer,ele_len);
 	napi_complete(napi);
 	
 	return budget-1;
@@ -271,6 +311,7 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 	
 	int rc;
 	int idx,idx_tmp;
+	int idx_buff;
 	struct net_device *netdev_tmp;
 	struct vlinky_adapter *adapter;
 	struct pci_private*private=kmalloc(sizeof(struct pci_private),GFP_KERNEL);
@@ -385,7 +426,10 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 			private->link_pri_arr[idx].channels_array[idx_tmp].channel_index=idx_tmp;
 			private->link_pri_arr[idx].channels_array[idx_tmp].adapter_ptr=adapter;/*channel reference back ,this is critical*/
 			private->link_pri_arr[idx].channels_array[idx_tmp].interrupt_requested=0;
-			netif_napi_add(adapter->netdev,&(private->link_pri_arr[idx].channels_array[idx_tmp].napi),vlinky_channel_poll,64);
+			for(idx_buff=0;idx_buff<DEFAULT_NAPI_BUDGET;idx_buff++){/*allocate queue buffer for RX poll routine*/
+				private->link_pri_arr[idx].channels_array[idx_tmp].queue_buffer[idx_buff]=kmalloc(sizeof(struct queue_element),GFP_KERNEL);
+			}
+			netif_napi_add(adapter->netdev,&(private->link_pri_arr[idx].channels_array[idx_tmp].napi),vlinky_channel_poll,DEFAULT_NAPI_BUDGET);
 			//napi_enable(&(private->link_pri_arr[idx].channels_array[idx_tmp].napi));
 			
 		}
@@ -462,7 +506,8 @@ int vlinky_pci_probe(struct pci_dev *pdev,const struct pci_device_id *ent)
 }
 void vlinky_pci_remove(struct pci_dev *pdev)
 {
-	int idx;
+	int idx,idx_tmp;
+	int idx_buff;
 	struct pci_private * private=pci_get_drvdata(pdev);
 	for(idx=0;idx<private->nr_links;idx++){
 		unregister_netdev(private->link_pri_arr[idx].adapter_ptr->netdev);
@@ -470,8 +515,14 @@ void vlinky_pci_remove(struct pci_dev *pdev)
 	}
 	
 	if(private->link_pri_arr){
-		for(idx=0;idx<private->nr_links;idx++)
+		for(idx=0;idx<private->nr_links;idx++){
+			for(idx_tmp=0;idx_tmp<private->link_pri_arr[idx].link_channels;idx_tmp++){
+				for(idx_buff=0;idx_buff<DEFAULT_NAPI_BUDGET;idx_buff++)
+					kfree(private->link_pri_arr[idx].channels_array[idx_tmp].queue_buffer[idx_buff]);
+				
+			}
 			kfree(private->link_pri_arr[idx].channels_array);
+		}
 		kfree(private->link_pri_arr);
 		private->link_pri_arr=NULL;
 	}
