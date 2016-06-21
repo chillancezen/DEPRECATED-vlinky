@@ -2,8 +2,15 @@
 special customization for NFV-load  requirments
 #####1st vlinky kernel-driver part
 ```sh
-#./build/l2fwd  -c 3 -n 2 --vdev="eth_pcap1,rx_iface=enp0s25,tx_pcap=./hello.pcap" --vdev="eth_vlinky0,queues=2,shm=cute,queue_length=1024,link_index=0" --vdev="eth_vlinky1,queues=4,shm=cute1,queue_length=10240,link_index=1"   --vdev="eth_vlinky2,queues=2,shm=cute2,queue_length=5200,link_index=2" -- -p 5
-#./qemu-system-x86_64 -smp 2  -m 1024  -enable-kvm -nographic -vnc :0 meeeow.qcow2  -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 -net nic,model=virtio 
+
+root@chillancezen-virtual-machine:/mnt/projects/vlinky/vlinky-pci#./build/l2fwd  -c 3 -n 2
+--vdev="eth_pcap1,rx_iface=enp0s25,tx_pcap=./hello.pcap" 
+--vdev="eth_vlinky0,queues=2,shm=cute,queue_length=1024,link_index=0"
+--vdev="eth_vlinky1,queues=4,shm=cute1,queue_length=10240,link_index=1"
+--vdev="eth_vlinky2,queues=2,shm=cute2,queue_length=5200,link_index=2" -- -p 5
+root@chillancezen-virtual-machine:/mnt/projects/vlinky/vlinky-pci#./qemu-system-x86_64 -smp 2  -m 1024 
+-enable-kvm -nographic -vnc :0 meeeow.qcow2  
+-net nic,model=virtio -net user,hostfwd=tcp::2222-:22 -net nic,model=virtio 
 -device pci_vlinky,config_file="/home/linky/MyWork/vlinky-sample.conf"
 
 root@chillancezen-virtual-machine:~# lspci -vvv -n 
